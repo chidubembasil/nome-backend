@@ -1,11 +1,8 @@
-# Use PHP 8.4.5 with Apache
+# PHP 8.4 with Apache
 FROM php:8.4-apache
 
-# Install PHP extensions (adjust as needed)
-RUN apt-get update && apt-get install -y \
-    libonig-dev \
-    libzip-dev \
-    unzip \
+# Install common extensions
+RUN apt-get update && apt-get install -y libonig-dev libzip-dev unzip \
     && docker-php-ext-install pdo pdo_mysql mbstring zip
 
 # Enable Apache rewrite
@@ -14,7 +11,7 @@ RUN a2enmod rewrite
 # Set working directory
 WORKDIR /var/www/html
 
-# Copy project files
+# Copy all files
 COPY . .
 
 # Install Composer
