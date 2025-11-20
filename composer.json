@@ -1,0 +1,7 @@
+{
+    "require": {
+        "mongodb/mongodb": "^2.1",
+        "workerman/workerman": "^5.1",
+        "ably/ably-php": "^1.1"
+    }
+}
