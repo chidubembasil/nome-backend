@@ -20,11 +20,7 @@
     // Select database and collections
     $tripp = $client->tripp;
     $trippUser = $tripp->users;
-    $trippProperty = $tripp->properties;
-    // $trippSearch = $tripp->search;
-    $trippFilter = $tripp->filter;
     $trippTransaction = $tripp->transactions;
-    $trippPay = $tripp->pay;
     $trippListing = $tripp->listing;
     $trippFav = $tripp->favourite;
 
@@ -34,3 +30,9 @@
     } catch (Exception $e) {
         echo "Connection failed: " . $e->getMessage();
     }
+
+    define('FLW_SECRET_KEY', 'LhQ6zjwLvbLJXxPEWNtyoCXYusAGOkQE');
+    // Define your two subaccount IDs
+ /*     define('SUBACCOUNT_PERCENTAGE', 'RS_A83B219334DD5EC356BA7DB99E38933F'); // for buy (percentage split)
+        define('SUBACCOUNT_FLAT', 'RS_08C55A89BC9509676E1A38FC95B4BC93'); // for rent/invest/stay (flat split)
+ */
