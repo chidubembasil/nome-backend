@@ -1,32 +1,48 @@
 <?php
     include "configs.php";
     include "auth.php";
+
     use Ably\AblyRest;
 
-    // Initialize Ably
+    // INIT ABLY
     $ably = new AblyRest('RSTb1g.vchEGQ:QDy0r8L70mwgsHpNtXNlWZ4DIN661iLkMCnI_7ELMDA');
     $channel = $ably->channels->get('mylistings');
 
     if ($_SERVER["REQUEST_METHOD"] == "POST") {
+
         $data = $_POST;
+
+        // Generate Unique ID
         $listingId = uniqid();
 
-        $propTitle = trim($data["propertyTitle"] ?? '');
-        $propDesc = trim($data["propertyDescription"] ?? '');
-        $address = trim($data["address"] ?? '');
-        $city = trim($data["city"] ?? '');
-        $state = trim($data["state"] ?? '');
-        $country = trim($data["country"] ?? '');
-        $zipCode = trim($data["zipCode"] ?? '');
-        $price = trim($data["price"] ?? '');
-        $bedroom = trim($data["bedroom"] ?? '');
-        $bathroom = trim($data["bathroom"] ?? '');
-        $squareFeet = trim($data["squareFeet"] ?? '');
-        $yearBuilt = trim($data["yearBuilt"] ?? '');
-        $parkingSpot = trim($data["parkingSpot"] ?? '');
+        // Sanitize inputs
+        $ListingType     = trim($data["ListingType"] ?? '');
+        $propTitle       = trim($data["propertyTitle"] ?? '');
+        $propDesc        = trim($data["propertyDescription"] ?? '');
+        $address         = trim($data["address"] ?? '');
+        $city            = trim($data["city"] ?? '');
+        $state           = trim($data["state"] ?? '');
+        $country         = trim($data["country"] ?? '');
+        $zipCode         = trim($data["zipCode"] ?? '');
+        $price           = trim($data["price"] ?? '');
+        $bedroom         = trim($data["bedroom"] ?? '');
+        $bathroom        = trim($data["bathroom"] ?? '');
+        $squareFeet      = trim($data["squareFeet"] ?? '');
+        $yearBuilt       = trim($data["yearBuilt"] ?? '');
+        $parkingSpot     = trim($data["parkingSpot"] ?? '');
+        $investmentPlan  = trim($data["investmentPlan"] ?? '');
+        $rentalDuration  = trim($data["rentalDuration"] ?? '');
+        $currency  = trim($data["currency"] ?? '');
 
-        // Validate required fields
-        if (!$propTitle || !$propDesc || !$address || !$city || !$state || !$country || !$price || !$bedroom || !$bathroom || !$squareFeet || !$parkingSpot) {
+        // --- REQUIRED FIELDS ---
+        $requiredFields = [
+            $propTitle, $propDesc, $address, $city, $state,
+            $country, $zipCode, $price, $bedroom, $bathroom,
+            $squareFeet, $parkingSpot, $yearBuilt, $ListingType, $currency
+        ];
+
+        // General required check
+        if (in_array('', $requiredFields)) {
             echo json_encode([
                 "status" => "error",
                 "message" => "All fields are required"
@@ -34,8 +50,25 @@
             exit;
         }
 
-        // Handle multiple images
-        if (!isset($_FILES['propertyImg'])) {
+        // Listing type specific
+        if ($ListingType === "invest" && empty($investmentPlan)) {
+            echo json_encode([
+                "status" => "error",
+                "message" => "Investment plan is required"
+            ]);
+            exit;
+        }
+
+        if ($ListingType === "rent" && empty($rentalDuration)) {
+            echo json_encode([
+                "status" => "error",
+                "message" => "Rental duration is required"
+            ]);
+            exit;
+        }
+
+        // --- IMAGES VALIDATION ---
+        if (!isset($_FILES["propertyImg"])) {
             echo json_encode([
                 "status" => "error",
                 "message" => "At least one property image is required"
@@ -45,67 +78,77 @@
 
         $images = [];
         $imageFiles = $_FILES['propertyImg'];
+
         for ($i = 0; $i < count($imageFiles['name']); $i++) {
+
             $tmpName = $imageFiles['tmp_name'][$i];
-            $name = uniqid() . "_" . basename($imageFiles['name'][$i]); // unique file name
-            $type = $imageFiles['type'][$i];
-            $size = $imageFiles['size'][$i];
-            $error = $imageFiles['error'][$i];
+            $error   = $imageFiles['error'][$i];
 
             if ($error === 0) {
-                $uploadPath = __DIR__ . "/uploads/" . $name;
+                $newName = uniqid() . "_" . basename($imageFiles['name'][$i]);
+                $uploadPath = __DIR__ . "/uploads/" . $newName;
+
                 move_uploaded_file($tmpName, $uploadPath);
+
                 $images[] = [
-                    "imageName" => $name,
-                    "imagePath" => "uploads/" . $name,
-                    "imageType" => $type,
-                    "imageSize" => $size
+                    "imageName" => $newName,
+                    "imagePath" => "uploads/" . $newName,
+                    "imageType" => $imageFiles['type'][$i],
+                    "imageSize" => $imageFiles['size'][$i]
                 ];
             }
         }
 
-        // Insert into MongoDB
+        // --- INSERT INTO MONGODB ---
         $upload = $trippProperty->insertOne([
-            'Listing_id' => $listingId,
-            'title' => $propTitle,
-            'description' => $propDesc,
-            'address' => $address,
-            'city' => $city,
-            'state' => $state,
-            'country' => $country,
-            'zipCode' => $zipCode,
-            'price' => $price,
-            'bedroom' => $bedroom,
-            'bathroom' => $bathroom,
-            'squareFeet' => $squareFeet,
-            'yearBuilt' => $yearBuilt,
-            'parkingSpot' => $parkingSpot,
-            'images' => $images,
-            'createdAt' => time()
+            "Listing_id"    => $listingId,
+            "title"         => $propTitle,
+            "type"          => $ListingType,
+            "description"   => $propDesc,
+            "address"       => $address,
+            "city"          => $city,
+            "state"         => $state,
+            "country"       => $country,
+            "zipCode"       => $zipCode,
+            "currency"      => $currency,
+            "price"         => $price,
+            "bedroom"       => $bedroom,
+            "bathroom"      => $bathroom,
+            "squareFeet"    => $squareFeet,
+            "yearBuilt"     => $yearBuilt,
+            "parkingSpot"   => $parkingSpot,
+            "images"        => $images,
+            "investmentPlan" => $investmentPlan,
+            "rentalDuration" => $rentalDuration,
+            "createdAt"     => time()
         ]);
 
         if ($upload) {
-            // Publish to Ably real-time channel
-            $channel->publish("mylistings", [
-                "action" => "new_listing",
-                "Listing_id" => $listingId,
-                "title" => $propTitle,
-                "images" => $images
+
+            // --- SEND REAL-TIME UPDATE TO ABLY ---
+            $channel->publish("update", [
+                "action"      => "new_listing",
+                "Listing_id"  => $listingId,
+                "title"       => $propTitle,
+                "images"      => $images
             ]);
 
             echo json_encode([
-            "status" => "success",
-            "message" => "Property uploaded successfully",
-            "data" => [
-                "Listing_id" => $listingId,
-                "title" => $propTitle,
-                "images" => $images
-            ]
+                "status" => "success",
+                "message" => "Property uploaded successfully",
+                "data" => [
+                    "Listing_id" => $listingId,
+                    "title" => $propTitle,
+                    "images" => $images
+                ]
             ]);
+
         } else {
             echo json_encode([
                 "status" => "error",
                 "message" => "Property upload failed"
             ]);
         }
+
     }
+

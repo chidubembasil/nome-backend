@@ -23,6 +23,8 @@
     $trippTransaction = $tripp->transactions;
     $trippListing = $tripp->listing;
     $trippFav = $tripp->favourite;
+    $trippNotifications = $tripp ->notification;
+    $trippKyc = $tripp->kyc;
 
     try {
         $client->listDatabases();
@@ -36,3 +38,6 @@
  /*     define('SUBACCOUNT_PERCENTAGE', 'RS_A83B219334DD5EC356BA7DB99E38933F'); // for buy (percentage split)
         define('SUBACCOUNT_FLAT', 'RS_08C55A89BC9509676E1A38FC95B4BC93'); // for rent/invest/stay (flat split)
  */
+
+        define('ABLY_API_KEY', 'RSTb1g.Dg9vCg:IYEo1Otd0e1OLvKynv_go5Ma3LvCEa2R1ln7KLwhRk8');
+        $ably = new AblyRest(ABLY_API_KEY);

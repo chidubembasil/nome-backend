@@ -1,123 +1,158 @@
 <?php
-require "../configs.php";
+    require "configs.php";
 
-header("Content-Type: application/json");
+    use PHPMailer\PHPMailer\PHPMailer;
+    use PHPMailer\PHPMailer\Exception;
 
-// Flutterwave Secret Key
-// define("FLW_SECRET_KEY", "YOUR_FLUTTERWAVE_SECRET_KEY");
+    require "../vendor/autoload.php";
 
-// Your subaccounts
-$PERCENT_SUBACCOUNT = "RS_A83B219334DD5EC356BA7DB99E38933F"; // 3% split for BUY
-$FLAT_SUBACCOUNT = "RS_08C55A89BC9509676E1A38FC95B4BC93";    // ₦500 flat for rent/stay/invest
+    header("Content-Type: application/json");
 
-// Redirect URL after Flutterwave payment
-$REDIRECT_URL = "https://yourwebsite.com/payment-success";
+    // Subaccounts
+    $PERCENT_SUBACCOUNT = "RS_A83B219334DD5EC356BA7DB99E38933F";
+    $FLAT_SUBACCOUNT = "RS_08C55A89BC9509676E1A38FC95B4BC93";
 
-if ($_SERVER["REQUEST_METHOD"] !== "POST") {
-    echo json_encode(["status" => "error", "message" => "Only POST allowed"]);
-    exit;
-}
+    $REDIRECT_URL = "https://yourwebsite.com/payment-success";
 
-// Get request data
-$data = json_decode(file_get_contents("php://input"), true);
+    // Allow only POST
+    if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+        echo json_encode(["status" => "error", "message" => "Only POST allowed"]);
+        exit;
+    }
 
-$propertyId = $data["propertyId"] ?? "";
-$userEmail = $data["email"] ?? "";
-$currency = strtoupper($data["currency"] ?? "NGN");
+    $data = json_decode(file_get_contents("php://input"), true);
 
-if (!$propertyId || !$userEmail) {
-    echo json_encode(["status" => "error", "message" => "Missing email or propertyId"]);
-    exit;
-}
+    $propertyId = $data["propertyId"] ?? "";
+    $userEmail = $data["email"] ?? "";
+    $currency = strtoupper($data["currency"] ?? "NGN");
 
-// Fetch property from MongoDB
-$property = $trippListing->findOne(["_id" => $propertyId]);
+    if (!$propertyId || !$userEmail) {
+        echo json_encode(["status" => "error", "message" => "Missing email or propertyId"]);
+        exit;
+    }
 
-if (!$property) {
-    echo json_encode(["status" => "error", "message" => "Property not found"]);
-    exit;
-}
+    // Fetch property
+    $property = $trippListing->findOne(["_id" => $propertyId]);
 
-$amount = $property["price"];
-$type = strtolower($property["type"]); // buy | rent | stay | invest
-$ownerId = $property["ownerId"] ?? "unknown";
+    if (!$property) {
+        echo json_encode(["status" => "error", "message" => "Property not found"]);
+        exit;
+    }
 
-// Determine split mode
-if ($type === "buy") {
-    $selectedSubaccount = $PERCENT_SUBACCOUNT;
-} else {
-    $selectedSubaccount = $FLAT_SUBACCOUNT;
-}
+    $amount = $property["price"];
+    $type = strtolower($property["type"]);
+    $ownerId = $property["ownerId"] ?? "unknown";
 
-// Prepare Flutterwave payload
-$payload = [
-    "tx_ref" => "TRIPP_" . uniqid(),
-    "amount" => $amount,
-    "currency" => $currency,
-    "redirect_url" => $REDIRECT_URL,
-    "customer" => [
-        "email" => $userEmail
-    ],
-    "customizations" => [
-        "title" => "Tripp Property Payment",
-        "description" => "Payment for property: " . ($property["title"] ?? "Real Estate Transaction")
-    ],
-    "subaccounts" => [
-        [
-            "id" => $selectedSubaccount
+    // Select subaccount
+    $selectedSubaccount = ($type === "buy") ? $PERCENT_SUBACCOUNT : $FLAT_SUBACCOUNT;
+
+    // Create payload
+    $payload = [
+        "tx_ref" => "TRIPP_" . uniqid(),
+        "amount" => $amount,
+        "currency" => $currency,
+        "redirect_url" => $REDIRECT_URL,
+        "customer" => [
+            "email" => $userEmail
+        ],
+        "customizations" => [
+            "title" => "Tripp Property Payment",
+            "description" => "Payment for property: " . ($property["title"] ?? "Real Estate Deal")
+        ],
+        "subaccounts" => [
+            ["id" => $selectedSubaccount]
         ]
-    ]
-];
+    ];
 
-$ch = curl_init("https://api.flutterwave.com/v3/payments");
+    //    Call Flutterwave
+    $ch = curl_init("https://api.flutterwave.com/v3/payments");
 
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_POST, true);
-curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    "Content-Type: application/json",
-    "Authorization: Bearer " . FLW_SECRET_KEY
-]);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Content-Type: application/json",
+        "Authorization: Bearer " . FLW_SECRET_KEY
+    ]);
 
-$response = curl_exec($ch);
+    $response = curl_exec($ch);
 
-// Fallback if curl_close is unavailable
-if (function_exists("curl_close")) {
-    curl_close($ch);
-}
+    if (function_exists("curl_close")) curl_close($ch);
 
-// Decode Flutterwave response
-$res = json_decode($response, true);
+    $res = json_decode($response, true);
 
-// If payment link not created
-if (!$res || $res["status"] !== "success") {
+    if (!$res || $res["status"] !== "success") {
+        echo json_encode([
+            "status" => "error",
+            "message" => "Flutterwave error",
+            "response" => $res
+        ]);
+        exit;
+    }
+
+    $paymentLink = $res["data"]["link"];
+
+    // Insert transaction
+    $trippTransaction->insertOne([
+        "tx_ref" => $payload["tx_ref"],
+        "propertyId" => $propertyId,
+        "ownerId" => $ownerId,
+        "email" => $userEmail,
+        "amount" => $amount,
+        "currency" => $currency,
+        "type" => $type,
+        "subaccount_used" => $selectedSubaccount,
+        "status" => "pending",
+        "createdAt" => date("Y-m-d H:i:s")
+    ]);
+
+
+    // --------------------------------------------
+    //  SEND EMAIL WITH TRANSACTION DETAILS
+    // --------------------------------------------
+    try {
+        $mail = new PHPMailer(true);
+
+        $mail->isSMTP();
+        $mail->Host = "smtp.gmail.com";
+        $mail->SMTPAuth = true;
+
+        // YOUR EMAIL + APP PASSWORD
+        $mail->Username = "yourgmail@gmail.com";
+        $mail->Password = "your-app-password";
+
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port = 587;
+
+        $mail->setFrom("yourgmail@gmail.com", "Tripp Real Estate");
+        $mail->addAddress($userEmail);
+
+        $mail->isHTML(true);
+        $mail->Subject = "Your Tripp Payment Link & Transaction Details";
+
+        $mail->Body = "
+            <h2>Your Payment Details</h2>
+            <p>Thank you for choosing Tripp.</p>
+            <p><strong>Property:</strong> {$property['title']}</p>
+            <p><strong>Amount:</strong> {$currency} {$amount}</p>
+            <p><strong>Type:</strong> {$type}</p>
+            <p><strong>Transaction Reference:</strong> {$payload['tx_ref']}</p>
+            <p><a href='$paymentLink'>Click here to complete your payment</a></p>
+            <br>
+            <p>Regards,<br>Tripp Team</p>
+        ";
+
+        $mail->send();
+
+    } catch (Exception $e) {
+        // Don't block payment if email fails
+    }
+
+
     echo json_encode([
-        "status" => "error",
-        "message" => "Flutterwave error",
-        "response" => $res
+        "status" => "success",
+        "message" => "Payment created",
+        "payment_link" => $paymentLink
     ]);
     exit;
-}
-
-// Insert transaction into DB
-$trippTransaction->insertOne([
-    "tx_ref" => $payload["tx_ref"],
-    "propertyId" => $propertyId,
-    "ownerId" => $ownerId,
-    "email" => $userEmail,
-    "amount" => $amount,
-    "currency" => $currency,
-    "type" => $type,
-    "subaccount_used" => $selectedSubaccount,
-    "status" => "pending",
-    "createdAt" => date("Y-m-d H:i:s")
-]);
-
-// Return payment link
-echo json_encode([
-    "status" => "success",
-    "message" => "Payment created",
-    "payment_link" => $res["data"]["link"]
-]);
-exit;
 

@@ -1,83 +1,180 @@
 <?php
     include 'configs.php';
 
+    use PHPMailer\PHPMailer\PHPMailer;
+    use PHPMailer\PHPMailer\Exception;
+
     header('Content-Type: application/json');
 
-    // Initialize success/error
-    $success = null;
-    $error = null;
-
+    // --- Handle POST (Login + Register + Forgot Password) ---
     if ($_SERVER["REQUEST_METHOD"] == "POST") {
+
         $data = json_decode(file_get_contents("php://input"), true);
+        $mode = $data["mode"] ?? "login"; // login | register | forgot
 
-        $email = $data['email'] ?? '';
+        // Common fields
+        $email = filter_var($data['email'] ?? '', FILTER_SANITIZE_EMAIL);
         $password = $data['password'] ?? '';
-        $sanitizedEmail = filter_var($email, FILTER_SANITIZE_EMAIL);
 
-        // Generate name from email
-        $username = explode("@", $sanitizedEmail)[0];
-        $name = preg_replace("/[\._]/", " ", $username);
-        $name = preg_replace("/\d+$/", "", $name);
-        $name = ucwords($name);
+        // ================
+        // 1️⃣ FORGOT PASSWORD
+        // ================
+        if ($mode === "forgot") {
 
-        $userId = uniqid();
+            if (empty($email)) {
+                echo json_encode(["status" => "error", "message" => "Email is required"]);
+                exit;
+            }
 
-        if (empty($sanitizedEmail) || empty($password) || empty($name)) {
+            $user = $trippUser->findOne(["email" => $email]);
+
+            if (!$user) {
+                echo json_encode([
+                    "status" => "error",
+                    "message" => "Email not found in system"
+                ]);
+                exit;
+            }
+
+            // Generate new password
+            $newPass = substr(str_shuffle("ABCDEFGHJKMNPQRSTUVWXYZ23456789"), 0, 8);
+
+            // Update in DB
+            $trippUser->updateOne(
+                ["email" => $email],
+                ['$set' => ["password" => password_hash($newPass, PASSWORD_DEFAULT)]]
+            );
+
+            // Send Email using PHPMailer
+            require '../vendor/phpmailer/phpmailer/src/PHPMailer.php';
+            require '../vendor/phpmailer/phpmailer/src/SMTP.php';
+            require '../vendor/phpmailer/phpmailer/src/Exception.php';
+
+            $mail = new PHPMailer(true);
+
+            try {
+                $mail->isSMTP();
+                $mail->Host       = "smtp.gmail.com";
+                $mail->SMTPAuth   = true;
+                $mail->Username   = "yourgmail@gmail.com"; // CHANGE
+                $mail->Password   = "your-app-password";   // CHANGE
+                $mail->SMTPSecure = "tls";
+                $mail->Port       = 587;
+
+                $mail->setFrom("no-reply@nome.com", "Tripp Support");
+                $mail->addAddress($email);
+
+                $mail->isHTML(true);
+                $mail->Subject = "Your Password Reset - Tripp";
+                $mail->Body = "
+                    <h3>Password Reset Successful</h3>
+                    <p>Your new password is:</p>
+                    <h2>$newPass</h2>
+                    <p>Please log in and change it immediately.</p>
+                ";
+
+                $mail->send();
+
+                echo json_encode([
+                    "status" => "success",
+                    "message" => "A new password has been sent to your email"
+                ]);
+            } catch (Exception $e) {
+                echo json_encode([
+                    "status" => "error",
+                    "message" => "Mailer Error: " . $mail->ErrorInfo
+                ]);
+            }
+
+            exit;
+        }
+
+        // ================
+        // 2️⃣ LOGIN
+        // ================
+        if ($mode === "login") {
+
+            if (empty($email) || empty($password)) {
+                echo json_encode(["status" => "error", "message" => "Email & password required"]);
+                exit;
+            }
+
+            $user = $trippUser->findOne(["email" => $email]);
+
+            if (!$user) {
+                echo json_encode(["status" => "error", "message" => "User not found"]);
+                exit;
+            }
+
+            if (!password_verify($password, $user['password'])) {
+                echo json_encode(["status" => "error", "message" => "Invalid password"]);
+                exit;
+            }
+
             echo json_encode([
-                "status" => "error",
-                "message" => "All fields are required"
+                "status" => "success",
+                "message" => "Login successful",
+                "user" => [
+                    "id" => $user["_id"],
+                    "email" => $user["email"],
+                    "name" => $user["name"]
+                ]
             ]);
             exit;
         }
 
-        $user = $trippUser->findOne(["email" => $sanitizedEmail]);
+        // ================
+        // 3️⃣ REGISTER
+        // ================
+        if ($mode === "register") {
 
-        if ($user) {
-            if (password_verify($password, $user['password'])) {
-                echo json_encode([
-                    "status" => "success",
-                    "message" => "Login successful"
-                ]);
-            } else {
-                echo json_encode([
-                    "status" => "error",
-                    "message" => "Invalid password"
-                ]);
+            if (empty($email) || empty($password)) {
+                echo json_encode(["status" => "error", "message" => "Email & password required"]);
+                exit;
             }
-            exit;
-        }
 
-        // Register new user
-        $insertUser = $trippUser->insertOne([
-            "_id" => $userId,
-            "name" => $name,
-            "email" => $sanitizedEmail,
-            "password" => password_hash($password, PASSWORD_DEFAULT)
-        ]);
+            $exists = $trippUser->findOne(["email" => $email]);
 
-        if ($insertUser->getInsertedCount() > 0) {
+            if ($exists) {
+                echo json_encode(["status" => "error", "message" => "Email already exists"]);
+                exit;
+            }
+
+            // Convert email to display name
+            $username = explode("@", $email)[0];
+            $name = ucwords(preg_replace("/[\._\d]/", " ", $username));
+            $userId = uniqid();
+
+            $insert = $trippUser->insertOne([
+                "_id" => $userId,
+                "name" => $name,
+                "email" => $email,
+                "password" => password_hash($password, PASSWORD_DEFAULT)
+            ]);
+
             echo json_encode([
                 "status" => "success",
                 "message" => "User registered successfully"
             ]);
-        } else {
-            echo json_encode([
-                "status" => "error",
-                "message" => "User registration failed"
-            ]);
+            exit;
         }
-        exit;
     }
 
-    // PUT request (update profile)
-    if ($_SERVER["REQUEST_METHOD"] == "PUT") {
+    // -----------------------------------------------------------
+    // PUT = Update Profile
+    // -----------------------------------------------------------
+    if ($_SERVER["REQUEST_METHOD"] === "PUT") {
+
         $data = json_decode(file_get_contents("php://input"), true);
+        $email = filter_var($data['email'] ?? '', FILTER_SANITIZE_EMAIL);
 
-        $email = $data['email'] ?? '';
-        $sanitizedEmail = filter_var($email, FILTER_SANITIZE_EMAIL);
+        if (empty($email)) {
+            echo json_encode(["status" => "error", "message" => "Email is required"]);
+            exit;
+        }
 
-        // Make sure required fields exist
-        $required = ['password','phoneNo','bio','address','city','state','country','zipCode'];
+        // Required fields
+        $required = ['phoneNo','bio','address','city','state','country','zipCode'];
         foreach ($required as $field) {
             if (empty($data[$field])) {
                 echo json_encode(["status"=>"error","message"=>"All fields are required"]);
@@ -85,31 +182,30 @@
             }
         }
 
-        // Build update array
+        // Update data
         $updateData = [
-            'phoneNo' => filter_var($data['phoneNo'], FILTER_SANITIZE_NUMBER_INT),
+            'phoneNo' => $data['phoneNo'],
             'bio' => $data['bio'],
             'address' => $data['address'],
             'city' => $data['city'],
             'state' => $data['state'],
             'country' => $data['country'],
-            'zipCode' => $data['zipCode']
+            'zipCode' => $data['zipCode'],
         ];
 
-        // Note: $_FILES does NOT work with PUT. Use POST for file uploads
-
-        $updateResult = $trippUser->updateMany(
-            ['email' => $sanitizedEmail],
-            ['$set' => $updateData],
-            ['upsert' => true]
+        $update = $trippUser->updateOne(
+            ['email' => $email],
+            ['$set' => $updateData]
         );
 
-        if ($updateResult->getModifiedCount() > 0 || $updateResult->getUpsertedCount() > 0) {
+        if ($update->getModifiedCount() > 0) {
             echo json_encode(["status"=>"success","message"=>"User updated successfully"]);
         } else {
-            echo json_encode(["status"=>"error","message"=>"User update failed"]);
+            echo json_encode(["status"=>"error","message"=>"No changes were made"]);
         }
+
         exit;
     }
+
 
     // No need for final echo with $success/$error

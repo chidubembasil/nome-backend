@@ -35,6 +35,47 @@
             require "api/rent.php";
             break;    
 
+        case "buy":
+            require "api/buy.php";
+            break;    
+        
+        case "invest":
+            require "api/invest.php";
+            break; 
+            
+        case "favorite":
+            require "api/favorite.php";
+            break;   
+            
+        case "mark":
+            require "api/markAsRead.php";
+            break;    
+        
+        case "create":
+            require "api/notify-create.php";
+            break;    
+
+        case "search":
+            require "api/rent.php";
+            break;   
+            
+        case "fetch":
+            require "api/notify-fetch.php";
+            break;   
+            
+        case "kyc":
+            require "api/kyc.php";
+            break; 
+            
+        case "nessa":
+            require "api/Nessa-Ai.php";
+            break;        
+
+        case "payment":
+            require "api/payment.php";
+            break;    
+
+         
         default:
             echo json_encode(["error" => "Invalid endpoint"]);
     }
